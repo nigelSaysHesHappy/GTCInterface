@@ -22,7 +22,7 @@
 
 namespace gtci
 {
-    size_t divCeil(size_t x, size_t y)
+    inline size_t divCeil(size_t x, size_t y)
     {
         return x / y + !!(x % y);
     }
