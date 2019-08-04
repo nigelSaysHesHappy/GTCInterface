@@ -49,7 +49,7 @@ namespace gtci
             running = true;
             stdinput = std::thread([this]
             {
-                std::cout<<"\e[7;1m\e7"<<std::string(termsize.ws_col,' ')<<"\e[0m\e8"<<std::flush;
+                std::cout<<"\e["<<termsize.ws_row<<"B\e[7;1m\e7"<<std::string(termsize.ws_col,' ')<<"\e[0m\e8"<<std::flush;
                 watchi();
             });
         }
@@ -66,7 +66,7 @@ namespace gtci
         }
         void printLn(const std::string& str)
         {
-            std::unique_lock<std::mutex> lock (omut);
+            std::unique_lock<std::recursive_mutex> lock (omut);
             unprintCurrent(lock,false);
             std::cout<<"\e[0m"<<str<<'\n';
             printCurrent(lock,false);
@@ -209,10 +209,9 @@ namespace gtci
         }
         bool getline_nonblock(std::string& out)
         {
-            std::unique_lock<std::mutex> lock (rmut);
-            //cv.wait(lock,[this]{ return !cinput.empty(); });
             if (!cinput.empty())
             {
+                std::unique_lock<std::mutex> lock (rmut);
                 out = cinput.front();
                 cinput.pop_front();
                 return true;
@@ -221,7 +220,7 @@ namespace gtci
         }
         private:
             std::thread stdinput;
-            std::mutex omut;
+            std::recursive_mutex omut;
             std::mutex rmut;
             std::condition_variable cv;
             std::string current;
@@ -235,36 +234,39 @@ namespace gtci
             std::vector<std::string>::reverse_iterator hpos;
             size_t getWidth()
             {
-                size_t width = termsize.ws_col;
-                if (current.size() > 0)
-                {
-                    size_t i = current.size() % termsize.ws_col;
-                    if (i)
-                        width -= i;
-                    else
-                        width = i;
-                }
+                size_t width = current.size() % termsize.ws_col;
+                if ((currpos) && (width == 0))
+                    width = 0;
+                else
+                    width = termsize.ws_col - width;
                 return width;
             }
-            void unprintCurrent(std::unique_lock<std::mutex>& lock, bool flush = true)
+            void unprintCurrent(std::unique_lock<std::recursive_mutex>& lock, bool flush = true)
             {
-                size_t height = divCeil(current.size(),termsize.ws_col);
-                std::cout<<"\e["<<height<<"B\r\e[2K";
+                size_t size = current.size();
+                if ((!currpos) && ((size % termsize.ws_col) == 0))
+                    ++size;
+                size_t height = divCeil(size,termsize.ws_col);
+                std::cout<<"\e["<<termsize.ws_row<<"B\r\e[2K";
                 for (;height > 1;--height)
                     std::cout<<"\e[1A\e[2K";
                 if (flush)
                     std::cout<<std::flush;
             }
-            void printCurrent(std::unique_lock<std::mutex>& lock, bool unprint = true, bool flush = true)
+            void printCurrent(std::unique_lock<std::recursive_mutex>& lock, bool unprint = true, bool flush = true)
             {
                 if (unprint)
                     unprintCurrent(lock,false);
-                std::cout<<"\e[7;1m"<<current<<"\e[K\e7"<<std::string(getWidth(),' ')<<"\e[0m\e8";
+                std::cout<<"\e[7;1m"<<current<<"\e[K";
+                size_t size = current.size();
+                if ((!currpos) && (size > 0) && ((size % termsize.ws_col) == 0))
+                    std::cout<<'\n';
+                std::cout<<"\e7"<<std::string(getWidth(),' ')<<"\e[0m\e8";
                 size_t lines, line, pos = currpos;
-                if ((current.size() > termsize.ws_col) && ((line = divCeil(current.size()-currpos+1,termsize.ws_col)) != (lines = divCeil(current.size(),termsize.ws_col))))
+                if ((size++ > termsize.ws_col) && ((line = divCeil(size-currpos,termsize.ws_col)) != (lines = divCeil(size,termsize.ws_col))))
                 {
                     std::cout<<"\r\e["<<lines-line<<"A\e["<<termsize.ws_col<<'C';
-                    pos = (current.size()-currpos+1) % termsize.ws_col;
+                    pos = (size-currpos) % termsize.ws_col;
                     if (pos > 0)
                         pos = termsize.ws_col - pos;
                 }
@@ -272,17 +274,14 @@ namespace gtci
                 if (flush)
                     std::cout<<std::flush;
             }
-            void printCurrent(std::mutex& mut, bool unprint = true, bool flush = true)
-            {
-                std::unique_lock<std::mutex> lock (omut);
-                printCurrent(lock,unprint,flush);
-            }
             void watchi()
             {
                 char c;
                 while (running)
                 {
                     c = getchar();
+                    std::unique_lock<std::recursive_mutex> lock (omut);
+                    unprintCurrent(lock,false);
                     if (!running)
                         break;
                     int mod = 0;
@@ -290,12 +289,10 @@ namespace gtci
                     {
                         case '\033':
                         {
-                            if ((c = getchar()) != '[')
-                                mod = MOD_ALT;
-                            else
+                            if ((c = getchar()) == '[')
                                 c = getchar();
-                            std::unique_lock<std::mutex> lock (omut);
-                            unprintCurrent(lock,false);
+                            else
+                                mod = MOD_ALT;
                             if (c == '1') // modifier
                             {
                                 if ((c = getchar()) == ';')
@@ -355,14 +352,11 @@ namespace gtci
                                 currpos = 0;
                             else if (c == 127)
                                 kbModBACKSPACE(mod);
-                            printCurrent(lock,false);
                             break;
                         }
                         case 8:     // delete, seemingly unused
                         case 127:   // backspace
                         {
-                            std::unique_lock<std::mutex> lock (omut);
-                            unprintCurrent(lock,false);
                             if (mod)
                                 kbModBACKSPACE(mod);
                             else if (current.size() > 0)
@@ -372,7 +366,6 @@ namespace gtci
                                 else if (currpos < current.size())
                                     current.erase(current.size()-currpos-1,1);
                             }
-                            printCurrent(lock,false);
                             break;
                         }
                         case '\r':
@@ -385,9 +378,6 @@ namespace gtci
                                 history.push_back(current);
                                 hpos = history.rbegin();
                             }
-                            std::unique_lock<std::mutex> lock (omut);
-                            std::cout<<"\e[1A";
-                            unprintCurrent(lock,false);
                             std::cout<<"\e[0;1m"<<current<<'\n';
                             {
                                 std::unique_lock<std::mutex> cvl (rmut);
@@ -396,7 +386,6 @@ namespace gtci
                             cv.notify_one();
                             current.clear();
                             getWinsize();
-                            printCurrent(lock,false);
                             break;
                         }
                         case '\t':
@@ -412,17 +401,12 @@ namespace gtci
                                 }
                                 current = callback(*this,current) + suffix;
                             }
-                            printCurrent(omut);
                             break;
                         }
                         default:
-                        {
-                            std::unique_lock<std::mutex> lock (omut);
-                            unprintCurrent(lock,false);
                             kbKeyInput(c);
-                            printCurrent(lock,false);
-                        }
                     }
+                    printCurrent(lock,false);
                 }
             }
     };

@@ -4,7 +4,7 @@
 
 std::string tab(gtci::interface& io, const std::string& current)
 {
-    io.printLn("Tab was pressed at: \"" + current + "\".");
+    //io.printLn("Tab was pressed at: \"" + current + "\".");
     return current + current;
 }
 
