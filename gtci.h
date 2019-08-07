@@ -60,16 +60,22 @@ namespace gtci
                 std::cerr<<"GTCInterface Error: Unable to reset input attributes."<<std::endl;
             stdinput.join();
         }
+        void setCallback(TabCallback cb)
+        {
+            callback = cb;
+        }
         void getWinsize()
         {
             ioctl(0,TIOCGWINSZ,&termsize);
         }
         void printLn(const std::string& str)
         {
+            //std::cout<<"Locking omut from thread: "<<std::this_thread::get_id()<<std::endl;//'\n'<<std::flush;
             std::unique_lock<std::recursive_mutex> lock (omut);
             unprintCurrent(lock,false);
             std::cout<<"\e[0m"<<str<<'\n';
             printCurrent(lock,false);
+            //std::cout<<"Unlocking omut from thread: "<<std::this_thread::get_id()<<std::endl;//'\n'<<std::flush;
         }
         virtual int getModifier(char c)
         {
@@ -280,6 +286,7 @@ namespace gtci
                 while (running)
                 {
                     c = getchar();
+                    //std::cout<<"Locking omut from thread: "<<std::this_thread::get_id()<<std::endl;
                     std::unique_lock<std::recursive_mutex> lock (omut);
                     unprintCurrent(lock,false);
                     if (!running)
@@ -407,6 +414,7 @@ namespace gtci
                             kbKeyInput(c);
                     }
                     printCurrent(lock,false);
+                    //std::cout<<"Unlocking omut from thread: "<<std::this_thread::get_id()<<std::endl;
                 }
             }
     };
